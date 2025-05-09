@@ -1,0 +1,58 @@
+name: CI/CD Seguro
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Scan filesystem (Trivy)
+        uses: aquasecurity/trivy-action@v0.6.1
+        with:
+          scan-type: fs
+          severity: HIGH,CRITICAL
+
+      - name: Build Docker image
+        run: docker build -t app_segura_py:latest .
+
+      - name: Scan Docker image (Trivy)
+        uses: aquasecurity/trivy-action@v0.6.1
+        with:
+          scan-type: image
+          image-ref: app_segura_py:latest
+          severity: HIGH,CRITICAL
+
+  deploy:
+    needs: build-and-scan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.TEST_HOST }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd ~/app_segura
+            git pull
+            docker-compose pull
+            docker-compose up -d --build
